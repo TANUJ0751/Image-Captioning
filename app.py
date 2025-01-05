@@ -1,93 +1,73 @@
 import streamlit as st
-import pickle 
 import tensorflow as tf
 from joblib import load
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-import os
+from tensorflow.keras.applications.vgg16 import VGG16, preprocess_input
+from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.models import Model
+from PIL import Image
 import numpy as np
 
-features={}
-directory='./Images'
+# Load VGG16 model for feature extraction
+base_model = VGG16()
+model = Model(inputs=base_model.inputs, outputs=base_model.layers[-2].output)
 
-#load features from pickle
-try:
-    with open('features.pkl', 'rb') as f:
-        features = pickle.load(f)
-        print("Features loaded successfully.")
-except EOFError:
-    print("The file is empty or corrupted. Please regenerate the pickle file.")
+# File uploader
+uploaded_image = st.file_uploader("Upload an Image", type=['jpg', 'jpeg', 'png'])
+if uploaded_image is not None:
+    # Load and preprocess the image
+    image = Image.open(uploaded_image)
+    st.image(image, caption='Uploaded Image', use_container_width=True)
+    image = image.resize((224, 224))
+    image = img_to_array(image)
+    image = image.reshape((1, 224, 224, 3))
+    image = preprocess_input(image)
+    feature = model.predict(image, verbose=0)
 
+ 
 
+    # Load caption data and mapping
+    try:
+        with open('./vars/captions.txt', 'r') as f:
+            next(f)
+            captions_doc = f.read()
+        mapping = load("./vars/Mapping.joblib")
+    except FileNotFoundError:
+        st.error("Required files (captions.txt or Mapping.joblib) not found.")
+        mapping = {}
 
-#load captions data
-with open('captions.txt','r') as f:
-    next(f)
-    captions_doc=f.read()
+    tokenizer = load("./vars/Tokenizer.joblib")
+    max_len = max(len(caption.split()) for captions in mapping.values() for caption in captions)
 
-mapping=load("Mapping.joblib")
+    def idx_to_word(integer, tokenizer):
+        for word, index in tokenizer.word_index.items():
+            if index == integer:
+                return word
+        return None
 
+    def predict_caption(model, image_feature, tokenizer, max_length):
+        in_text = 'startseq'
+        for _ in range(max_length):
+            sequence = tokenizer.texts_to_sequences([in_text])[0]
+            sequence = pad_sequences([sequence], maxlen=max_length)
+            yhat = model.predict([image_feature, sequence], verbose=0)
+            yhat = np.argmax(yhat)
+            word = idx_to_word(yhat, tokenizer)
+            if word is None or word == 'endseq':
+                break
+            in_text += f" {word}"
+        return in_text
 
-all_captions=[]
-for key in mapping:
-    for caption in mapping[key]:
-        all_captions.append(caption)
+    model3 = tf.keras.models.load_model("./model/best_model_70_epochs.keras")
 
+    def generate_caption(model):
+        
+        
+        
+        y_pred = predict_caption(model, feature, tokenizer, 35)
+        y_pred_refined = ' '.join(y_pred.split()[1:])  # Exclude the first and last tokens
+        st.write("**Predicted Caption:**", y_pred_refined)
+        
 
-tokenizer=load("Tokenizer.joblib")
-
-
-max_len=max(len(caption.split()) for caption in all_captions)
-
-def idx_to_word(integer,tokenizer):
-    for word,index in tokenizer.word_index.items():
-        if index == integer:
-            return word
-    return None
-def predict_caption(model,image,tokenizer,max_length):
-    #add start tag for generation
-    in_text='startseq'
-    #iterate over maxlength of sequence
-    for i in range(max_length):
-        #incode input sequence
-        sequence=tokenizer.texts_to_sequences([in_text])[0]
-        #pad the sequence
-        sequence=pad_sequences([sequence],max_length)
-        #predict next word
-        yhat=model.predict([image,sequence],verbose=0)
-        #convert index with high probability
-        yhat=np.argmax(yhat)
-        #convert index to word
-        word=idx_to_word(yhat,tokenizer)
-        #stop if word not found
-        if word is None:
-            break
-        #append word as input for generation next word
-        in_text +=" "+word
-        #stop if we reach end tag
-        if word =='endseq':
-            break
-    return in_text
-
-model3=tf.keras.models.load_model("./model/best_model_70_epochs.keras")
-from PIL import Image
-import matplotlib.pyplot as plt
-def generate_caption(image_name,model):
-    #load Image
-    #image_name="1002674143_1b742ab4b8.jpg"
-    image_id=image_name.split('.')[0]
-    image_path=os.path.join("Images",image_name)
-    image=Image.open(image_path)
-    
-    captions=mapping[image_id]
-    print("---------------------------Original Caption--------------------------")
-    for caption in captions:
-        print(caption)
-    
-    #predict the caption
-    y_pred=predict_caption(model,features[image_id],tokenizer,max_len)
-    
-    print("--------------------------Predicted Caption----------------")
-    st.write(y_pred)
-    st.image(image)
-
-generate_caption("3747543364_bf5b548527.jpg",model3)
+    # Replace with actual image name for testing
+    generate_caption(model3)
