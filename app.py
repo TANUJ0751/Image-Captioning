@@ -58,7 +58,7 @@ if uploaded_image is not None:
             in_text += f" {word}"
         return in_text
 
-    model3 = tf.keras.models.load_model("./model/best_model_90_epochs.keras")
+    model3 = tf.keras.models.load_model("./model/best_model_120_epochs.keras")
 
     def generate_caption(model):
         
